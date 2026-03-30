@@ -1,5 +1,17 @@
 import type { BlinkEvent, MinuteBin, SessionSnapshot, SessionSummary } from './types';
 
+const ATHENS_TIME_ZONE = 'Europe/Athens';
+const ATHENS_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: ATHENS_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23'
+});
+
 const SESSION_HEADERS = [
   'id',
   'participantLabel',
@@ -73,6 +85,60 @@ function safeTimestampLabel(isoTimestamp: string): string {
   return isoTimestamp.replaceAll(':', '-');
 }
 
+function formatOffset(offsetMinutes: number): string {
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const absoluteMinutes = Math.abs(offsetMinutes);
+  const hours = Math.floor(absoluteMinutes / 60)
+    .toString()
+    .padStart(2, '0');
+  const minutes = (absoluteMinutes % 60).toString().padStart(2, '0');
+
+  return `${sign}${hours}:${minutes}`;
+}
+
+function formatDateForAthens(date: Date): string {
+  const parts = ATHENS_DATE_TIME_FORMATTER.formatToParts(date);
+  const values = Object.fromEntries(
+    parts
+      .filter((part) =>
+        part.type === 'year' ||
+        part.type === 'month' ||
+        part.type === 'day' ||
+        part.type === 'hour' ||
+        part.type === 'minute' ||
+        part.type === 'second'
+      )
+      .map((part) => [part.type, part.value])
+  ) as Record<'year' | 'month' | 'day' | 'hour' | 'minute' | 'second', string>;
+
+  const year = Number(values.year);
+  const month = Number(values.month);
+  const day = Number(values.day);
+  const hour = Number(values.hour);
+  const minute = Number(values.minute);
+  const second = Number(values.second);
+  const milliseconds = date.getMilliseconds().toString().padStart(3, '0');
+  const offsetMinutes = Math.round(
+    (Date.UTC(year, month - 1, day, hour, minute, second, date.getMilliseconds()) - date.getTime()) / 60_000
+  );
+
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}:${values.second}.${milliseconds}${formatOffset(offsetMinutes)}`;
+}
+
+function formatIsoTimestampForAthens(isoTimestamp: string | null): string | null {
+  if (isoTimestamp === null) {
+    return null;
+  }
+
+  const date = new Date(isoTimestamp);
+
+  if (Number.isNaN(date.getTime())) {
+    return isoTimestamp;
+  }
+
+  return formatDateForAthens(date);
+}
+
 function buildSessionRows(sessions: SessionSummary[]): Array<Array<string | number | null>> {
   const rows: Array<Array<string | number | null>> = [Array.from(SESSION_HEADERS)];
 
@@ -81,15 +147,15 @@ function buildSessionRows(sessions: SessionSummary[]): Array<Array<string | numb
       session.id,
       session.participantLabel,
       session.sessionNotes,
-      session.startedAtIso,
-      session.endedAtIso,
+      formatIsoTimestampForAthens(session.startedAtIso),
+      formatIsoTimestampForAthens(session.endedAtIso),
       session.durationMs,
       session.totalBlinks,
       session.overallBlinksPerMinute,
       session.meanInterBlinkIntervalMs,
       session.meanIntensity,
       session.maxIntensity,
-      session.exportedAtIso
+      formatIsoTimestampForAthens(session.exportedAtIso)
     ]);
   }
 
@@ -109,7 +175,7 @@ function buildBlinkEventRows(events: BlinkEvent[]): Array<Array<string | number 
       event.endMs,
       event.durationMs,
       event.timeFromSessionStartMs,
-      event.wallClockIso,
+      formatIsoTimestampForAthens(event.wallClockIso),
       event.leftEarMin,
       event.rightEarMin,
       event.combinedEarMin,
@@ -170,19 +236,19 @@ export function buildCurrentSessionBlinkEventsCsv(snapshot: SessionSnapshot): st
 
 export function exportCurrentSessionBlinkEventsCsv(snapshot: SessionSnapshot): void {
   downloadCsv(
-    `blink-events-${safeTimestampLabel(snapshot.summary.startedAtIso)}.csv`,
+    `blink-events-${safeTimestampLabel(formatIsoTimestampForAthens(snapshot.summary.startedAtIso) ?? snapshot.summary.startedAtIso)}.csv`,
     buildCurrentSessionBlinkEventsCsv(snapshot)
   );
 }
 
 export function exportAllBlinkEventsCsv(events: BlinkEvent[]): void {
-  downloadCsv(`blink_events-${new Date().toISOString().replaceAll(':', '-')}.csv`, buildBlinkEventsCsv(events));
+  downloadCsv(`blink_events-${safeTimestampLabel(formatDateForAthens(new Date()))}.csv`, buildBlinkEventsCsv(events));
 }
 
 export function exportAllSessionSummariesCsv(sessions: SessionSummary[]): void {
-  downloadCsv(`sessions-${new Date().toISOString().replaceAll(':', '-')}.csv`, buildSessionsCsv(sessions));
+  downloadCsv(`sessions-${safeTimestampLabel(formatDateForAthens(new Date()))}.csv`, buildSessionsCsv(sessions));
 }
 
 export function exportAllMinuteBinsCsv(minuteBins: MinuteBin[]): void {
-  downloadCsv(`minute_bins-${new Date().toISOString().replaceAll(':', '-')}.csv`, buildMinuteBinsCsv(minuteBins));
+  downloadCsv(`minute_bins-${safeTimestampLabel(formatDateForAthens(new Date()))}.csv`, buildMinuteBinsCsv(minuteBins));
 }
