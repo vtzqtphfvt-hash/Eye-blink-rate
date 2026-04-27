@@ -414,8 +414,34 @@ export async function getBlinkEventsForSession(sessionId: string): Promise<Blink
 
 export async function listAllBlinkEvents(): Promise<BlinkEvent[]> {
   return transactionPromise(['sessions', 'blink_events', 'minute_bins', 'settings'], 'readonly', async (stores) => {
-    const events = await requestToPromise(stores.blink_events.getAll());
-    return normalizeBlinkEventList(events);
+    const [events, sessionRows] = await Promise.all([
+      requestToPromise(stores.blink_events.getAll()),
+      requestToPromise(stores.sessions.getAll())
+    ]);
+
+    const sessionStartMap = new Map<string, string>();
+    for (const row of sessionRows) {
+      const summary = normalizeSessionSummaryRecord(row);
+      sessionStartMap.set(summary.id, summary.startedAtIso);
+    }
+
+    const normalizedEvents = normalizeBlinkEventList(events);
+
+    return normalizedEvents.sort((a, b) => {
+      if (a.sessionId === b.sessionId) {
+        return a.timeFromSessionStartMs - b.timeFromSessionStartMs;
+      }
+
+      const startA = sessionStartMap.get(a.sessionId) ?? '';
+      const startB = sessionStartMap.get(b.sessionId) ?? '';
+
+      const sessionCmp = startB.localeCompare(startA);
+      if (sessionCmp !== 0) {
+        return sessionCmp;
+      }
+
+      return a.sessionId.localeCompare(b.sessionId);
+    });
   });
 }
 
@@ -432,10 +458,34 @@ export async function getMinuteBinsForSession(sessionId: string): Promise<Minute
 
 export async function listAllMinuteBins(): Promise<MinuteBin[]> {
   return transactionPromise(['sessions', 'blink_events', 'minute_bins', 'settings'], 'readonly', async (stores) => {
-    const bins = await requestToPromise(stores.minute_bins.getAll());
+    const [bins, sessionRows] = await Promise.all([
+      requestToPromise(stores.minute_bins.getAll()),
+      requestToPromise(stores.sessions.getAll())
+    ]);
+
+    const sessionStartMap = new Map<string, string>();
+    for (const row of sessionRows) {
+      const summary = normalizeSessionSummaryRecord(row);
+      sessionStartMap.set(summary.id, summary.startedAtIso);
+    }
+
     return bins
       .map((entry) => normalizeMinuteBinRecord(entry))
-      .sort((a, b) => (a.sessionId === b.sessionId ? a.minuteIndex - b.minuteIndex : a.sessionId.localeCompare(b.sessionId)));
+      .sort((a, b) => {
+        if (a.sessionId === b.sessionId) {
+          return a.minuteIndex - b.minuteIndex;
+        }
+
+        const startA = sessionStartMap.get(a.sessionId) ?? '';
+        const startB = sessionStartMap.get(b.sessionId) ?? '';
+
+        const sessionCmp = startB.localeCompare(startA);
+        if (sessionCmp !== 0) {
+          return sessionCmp;
+        }
+
+        return a.sessionId.localeCompare(b.sessionId);
+      });
   });
 }
 
